@@ -19,3 +19,15 @@ Add this function to your shell profile (either .bashrc or .zshrc)
 # fcd
 fcd() { cd "$(fcdclient "$@")"; }
 ```
+## Usage
+
+Use fcd everywhere instead of cd in your shell.
+
+For example if your in home folder and you have Downloads folder which contains another folder called Recent,
+to go into that folder just type, fcd will automatically find suitable folder based on your pattern and fill navigate you to your destination
+
+    fcd dow rec
+
+fcdserver is automatically started when you run fcd first time, it creates ~/.fcddump file
+which contains stats about often visited directories and number of times they were visited,
+this file is also used as a sort of bookmark when search for a directories
