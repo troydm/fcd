@@ -1,0 +1,228 @@
+#!/usr/bin/env perl
+# fcdserver - faster cd server script
+# written in Perl and licensed under MIT terms and conditions
+# (C) 2017 Dmitry "troydm" Geurkov (d.geurkov@gmail.com)
+
+use strict;
+use warnings;
+use utf8;
+use File::Spec;
+use File::Basename;
+use Cwd qw(cwd realpath);
+use IO::Socket::UNIX;
+use POSIX qw(setsid);
+use Data::Printer;
+
+sub daemonize {
+    chdir(q{/})                      || die "can't chdir to /: $!";
+    open( STDIN, "<", "/dev/null" )  || die "can't read /dev/null: $!";
+    open( STDOUT, ">", "/dev/null" ) || die "can't write to /dev/null: $!";
+    defined( my $pid = fork() )      || die "can't fork: $!";
+    exit if $pid;    # non-zero now means I am the parent
+    ( setsid() != -1 )               || die "can't start a new session: $!";
+    open( STDERR, ">", "/dev/null" ) || die "can't write to /dev/null: $!";
+    return;
+}
+
+daemonize unless defined( $ARGV[0] ) && $ARGV[0] eq '-f';
+
+my $user = getlogin || getpwuid $<;
+my $socket_path = "/tmp/fcd_$user.sock";
+my $fcddump_path = $ENV{'HOME'} . '/.fcddump';
+
+sub signal_handler {
+    unlink $socket_path;
+    exit 0;
+}
+
+local $SIG{INT}  = \&signal_handler;
+local $SIG{TERM} = \&signal_handler;
+
+my %freq;
+
+if ( -e $fcddump_path ) {
+    if (open( my $fh, '<', $fcddump_path )) {
+        binmode( $fh, ':encoding(UTF-8)' );
+        while ( my $line = <$fh> ) {
+            chomp $line;
+            if ( $line =~ /^(.+)=(\d+)$/x ) {
+                $freq{$1} = $2;
+            }
+        }
+        close $fh;
+    }
+}
+
+my $freqdumpinterval = 300;
+my $lastfreqdump     = 0;
+
+sub list_dirs {
+    my ($dir) = @_;
+    my @dirs;
+    if (opendir( my $dh, $dir )) {
+        while ( readdir $dh ) {
+            if ( !( $_ =~ /^\.{1,2}$/x ) && -d "$dir/$_" ) {
+                push @dirs, $_;
+            }
+        }
+        closedir $dh;
+    }
+    return @dirs;
+}
+
+sub dump_freq {
+    my ($dir) = @_;
+    $dir =~ s/\/\//\//xg;
+    $dir = realpath($dir) || $dir;
+    if ( -d $dir ) {
+        $freq{$dir} = ($freq{$dir} || 0) + 1;
+    }
+    elsif (exists $freq{$dir}) {
+        delete $freq{$dir};
+    }
+    if ( ( time() - $lastfreqdump ) >= $freqdumpinterval ) {
+        if (open( my $fh, '>', $fcddump_path )) {
+            binmode( $fh, ':encoding(UTF-8)' );
+            foreach my $d ( keys %freq ) {
+                print {$fh} "$d=$freq{$d}\n";
+            }
+            close $fh;
+            $lastfreqdump = time();
+        }
+    }
+    return $dir;
+}
+
+sub prl {
+    my ($p) = @_;
+    return (qr/^\Q$p\E$/x, qr/^\Q$p\E$/xi, qr/^\Q$p\E/xi, qr/\Q$p\E/xi);
+}
+
+sub match_freq {
+    my ($dp,$prlp) = @_;
+    my @d = @$dp;
+    my @prl = @$prlp;
+    my @p = @{shift @prl};
+    for my $pr (@p) {
+        my $i = 1;
+        for my $d (@$dp) {
+            if ($d =~ $pr) {
+                if (@prl == 0) {
+                    return 1;
+                }
+                my @sd = @d[ $i .. $#d ];
+                if (match_freq(\@sd,\@prl)) {
+                    return 1;
+                }
+            }
+            $i++;
+        }
+    }
+    return;
+}
+
+sub fcd_freq {
+    my (@p) = @_;
+    @p = map { [prl($_)] } @p;
+    my @dirs = sort { -1 * ($freq{$a} cmp $freq{$b}) } (keys %freq);
+    for my $d (@dirs) {
+        my @d = split /\//x, $d;
+        if (match_freq(\@d,\@p)) {
+            return $d;
+        }
+    }
+    return;
+}
+
+sub match_dirs {
+    my ($dirs,$pl) = @_;
+    my @result;
+    for my $p (@$pl) {
+        for my $d (@$dirs) {
+            if ($d =~ $p && !(grep { $_ eq $d } @result)) {
+                push @result, $d;
+            }
+        }
+    }
+    return @result;
+}
+
+sub fcd_dir {
+    my (@p) = @_;
+    my $cwd = '';
+    while (@p > 0) {
+        my $p = $p[0];
+        if ( -d "$cwd$p" ) {
+            if ($cwd) {
+                $cwd .= (shift @p) . q{/};
+            }
+            else {
+                $cwd = shift @p;
+            }
+        }
+        else {
+            last;
+        }
+    }
+    if (@p == 0) {
+        return $cwd;
+    }
+    my $wd = cwd();
+    if ($cwd) {
+        chdir $cwd;
+    }
+    my @dirs = list_dirs(q{.});
+    my $p = shift @p;
+    my @prl = prl($p);
+    for my $d (match_dirs(\@dirs,\@prl)) {
+        if (@p == 0) {
+            return $d;
+        }
+        else {
+            my $subwd = cwd();
+            chdir $d;
+            my $found = fcd_dir(@p);
+            if ($found) {
+                return $found;
+            }
+            chdir $subwd;
+        }
+    }
+    chdir $wd;
+    return;
+}
+
+sub fcd {
+    my ($cwd,$path) = @_;
+    chdir $cwd;
+    $path =~ s/\/\//\//xg;
+    if ( -d $path ) {
+        return dump_freq( $path );
+    }
+    my @p = split /\//x, $path;
+    if ( substr($path,0,1) eq q{/} ) {
+        $p[0] = '/';
+    }
+    return dump_freq( fcd_dir(@p) || fcd_freq(@p) || (join q{/}, @p) );
+}
+
+unlink $socket_path if -e $socket_path;
+
+my $socket = IO::Socket::UNIX->new(
+    Local  => $socket_path,
+    Type   => SOCK_STREAM(),
+    Listen => SOMAXCONN(),
+) or die("Couldn't create a socket: $!");
+
+my $cwd;
+my $path;
+while (1) {
+    if ( my $con = $socket->accept ) {
+        binmode( $con, ':encoding(UTF-8)' );
+        $con->autoflush(1);
+        chomp( $cwd = <$con> );
+        chomp( $path = <$con> );
+        print {$con} fcd($cwd,$path) . "\n";
+        close $con;
+    }
+}

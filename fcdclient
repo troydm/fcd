@@ -1,0 +1,50 @@
+#!/usr/bin/env perl
+# fcdclient - faster cd client script
+# written in Perl and licensed under MIT terms and conditions
+# (C) 2017 Dmitry "troydm" Geurkov (d.geurkov@gmail.com)
+
+use strict;
+use warnings;
+use utf8;
+use IO::Socket::UNIX;
+use Cwd qw(cwd);
+
+my $dir;
+if (@ARGV) {
+    $dir = join q{/}, @ARGV;
+}
+else {
+    $dir = $ENV{'HOME'};
+}
+
+my $wd          = cwd();
+my $user        = getlogin || getpwuid $<;
+my $socket_path = "/tmp/fcd_$user.sock";
+
+my $socket;
+my $fcdserver_started = 0;
+
+while (1) {
+    $socket = IO::Socket::UNIX->new(
+        Type => SOCK_STREAM(),
+        Peer => $socket_path,
+    );
+    if ($socket) {
+        last;
+    }
+    else {
+        if ( $fcdserver_started == 0 ) {
+            system 'fcdserver';
+        }
+        $fcdserver_started = 1;
+    }
+}
+
+binmode STDOUT, ':encoding(UTF-8)';
+binmode $socket, ':encoding(UTF-8)';
+
+$socket->autoflush(1);
+print {$socket} "$wd\n$dir\n";
+chomp( my $line = <$socket> );
+print $line;
+close $socket;
