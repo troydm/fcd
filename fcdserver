@@ -52,6 +52,8 @@ if ( -e $fcddump_path ) {
     }
 }
 
+my %recursiveignoredirs = ('.git' => 1);
+my $maxrecursivedepth = 5;
 my $freqdumpinterval = 300;
 my $lastfreqdump     = 0;
 
@@ -97,7 +99,7 @@ sub prl {
     return (qr/^\Q$p\E$/x, qr/^\Q$p\E$/xi, qr/^\Q$p\E/xi, qr/\Q$p\E/xi);
 }
 
-sub match_freq {
+sub match_array {
     my ($dp,$prlp) = @_;
     my @d = @$dp;
     my @prl = @$prlp;
@@ -110,7 +112,7 @@ sub match_freq {
                     return 1;
                 }
                 my @sd = @d[ $i .. $#d ];
-                if (match_freq(\@sd,\@prl)) {
+                if (match_array(\@sd,\@prl)) {
                     return 1;
                 }
             }
@@ -126,8 +128,42 @@ sub fcd_freq {
     my @dirs = sort { -1 * ($freq{$a} cmp $freq{$b}) } (keys %freq);
     for my $d (@dirs) {
         my @d = split /\//x, $d;
-        if (match_freq(\@d,\@p)) {
+        if (match_array(\@d,\@p)) {
             return $d;
+        }
+    }
+    return;
+}
+
+sub match_recursive {
+    my ($dl,$p,$lvl) = @_;
+    if (match_array($dl,$p)) {
+        return (join q{/}, @$dl);
+    }
+    if ($lvl <= $maxrecursivedepth) {
+        my @dirs = list_dirs((join q{/}, @$dl));
+        for my $d (@dirs) {
+            next if (exists $recursiveignoredirs{$d});
+            my @dp = (@$dl,$d);
+            my $m = match_recursive(\@dp,$p,$lvl+1);
+            if ($m) {
+                return $m;
+            }
+        }
+    }
+    return;
+}
+
+sub fcd_recursive {
+    my (@p) = @_;
+    @p = map { [prl($_)] } @p;
+    my @dirs = list_dirs(q{.});
+    for my $d (@dirs) {
+        next if (exists $recursiveignoredirs{$d});
+        my @dl = ($d);
+        my $m = match_recursive(\@dl,\@p,1);
+        if ($m) {
+            return $m;
         }
     }
     return;
@@ -200,9 +236,9 @@ sub fcd {
     }
     my @p = split /\//x, $path;
     if ( substr($path,0,1) eq q{/} ) {
-        $p[0] = '/';
+        $p[0] = q{/};
     }
-    return dump_freq( fcd_dir(@p) || fcd_freq(@p) || (join q{/}, @p) );
+    return dump_freq( fcd_dir(@p) || fcd_freq(@p) || fcd_recursive(@p) || (join q{/}, @p) );
 }
 
 unlink $socket_path if -e $socket_path;
