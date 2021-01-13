@@ -156,6 +156,11 @@ sub match_recursive {
 
 sub fcd_recursive {
     my (@p) = @_;
+    my $wd = cwd();
+    @p = reduce_pattern(@p);
+    if (@p == 0) {
+        return cwd();
+    }
     @p = map { [prl($_)] } @p;
     my @dirs = list_dirs(q{.});
     for my $d (@dirs) {
@@ -166,6 +171,7 @@ sub fcd_recursive {
             return $m;
         }
     }
+    chdir $wd;
     return;
 }
 
@@ -182,7 +188,7 @@ sub match_dirs {
     return @result;
 }
 
-sub fcd_dir {
+sub reduce_pattern {
     my (@p) = @_;
     my $cwd = '';
     while (@p > 0) {
@@ -199,12 +205,18 @@ sub fcd_dir {
             last;
         }
     }
-    if (@p == 0) {
-        return $cwd;
-    }
-    my $wd = cwd();
     if ($cwd) {
         chdir $cwd;
+    }
+    return @p;
+}
+
+sub fcd_dir {
+    my (@p) = @_;
+    my $wd = cwd();
+    @p = reduce_pattern(@p);
+    if (@p == 0) {
+        return cwd();
     }
     my @dirs = list_dirs(q{.});
     my $p = shift @p;
