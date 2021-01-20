@@ -11,15 +11,16 @@ use File::Basename;
 use Cwd qw(cwd realpath);
 use IO::Socket::UNIX;
 use POSIX qw(setsid);
+use Carp qw(confess);
 
 sub daemonize {
-    chdir(q{/})                      || die "can't chdir to /: $!";
-    open( STDIN, "<", "/dev/null" )  || die "can't read /dev/null: $!";
-    open( STDOUT, ">", "/dev/null" ) || die "can't write to /dev/null: $!";
-    defined( my $pid = fork() )      || die "can't fork: $!";
+    chdir(q{/})                      || confess "can't chdir to /";
+    open( STDIN, "<", "/dev/null" )  || confess "can't read /dev/null";
+    open( STDOUT, ">", "/dev/null" ) || confess "can't write to /dev/null";
+    defined( my $pid = fork() )      || confess "can't fork";
     exit if $pid;    # non-zero now means I am the parent
-    ( setsid() != -1 )               || die "can't start a new session: $!";
-    open( STDERR, ">", "/dev/null" ) || die "can't write to /dev/null: $!";
+    ( setsid() != -1 )               || confess "can't start a new session";
+    open( STDERR, ">", "/dev/null" ) || confess "can't write to /dev/null";
     return;
 }
 
@@ -52,10 +53,10 @@ if ( -e $fcddump_path ) {
     }
 }
 
-my %recursiveignoredirs = ('.git' => 1);
-my $maxrecursivedepth = 5;
-my $freqdumpinterval = 300;
-my $lastfreqdump     = 0;
+my %ignore_dirs = ('.git' => 1);
+my $max_depth = 5;
+my $freq_dump_interval = 300;
+my $last_freq_dump_time = time();
 
 sub list_dirs {
     my ($dir) = @_;
@@ -81,20 +82,20 @@ sub dump_freq {
     elsif (exists $freq{$dir}) {
         delete $freq{$dir};
     }
-    if ( ( time() - $lastfreqdump ) >= $freqdumpinterval ) {
+    if ( ( time() - $last_freq_dump_time ) >= $freq_dump_interval ) {
         if (open( my $fh, '>', $fcddump_path )) {
             binmode( $fh, ':encoding(UTF-8)' );
             foreach my $d ( keys %freq ) {
                 print {$fh} "$d=$freq{$d}\n";
             }
             close $fh;
-            $lastfreqdump = time();
+            $last_freq_dump_time = time();
         }
     }
     return $dir;
 }
 
-sub prl {
+sub pattern_regexp_list {
     my ($p) = @_;
     return (qr/^\Q$p\E$/x, qr/^\Q$p\E$/xi, qr/^\Q$p\E/xi, qr/\Q$p\E/xi);
 }
@@ -124,7 +125,7 @@ sub match_array {
 
 sub fcd_freq {
     my (@p) = @_;
-    @p = map { [prl($_)] } @p;
+    @p = map { [pattern_regexp_list($_)] } @p;
     my @dirs = sort { -1 * ($freq{$a} cmp $freq{$b}) } (keys %freq);
     for my $d (@dirs) {
         my @d = split /\//x, $d;
@@ -140,10 +141,10 @@ sub match_recursive {
     if (match_array($dl,$p)) {
         return (join q{/}, @$dl);
     }
-    if ($lvl <= $maxrecursivedepth) {
+    if ($lvl <= $max_depth) {
         my @dirs = list_dirs((join q{/}, @$dl));
         for my $d (@dirs) {
-            next if (exists $recursiveignoredirs{$d});
+            next if (exists $ignore_dirs{$d});
             my @dp = (@$dl,$d);
             my $m = match_recursive(\@dp,$p,$lvl+1);
             if ($m) {
@@ -161,10 +162,10 @@ sub fcd_recursive {
     if (@p == 0) {
         return cwd();
     }
-    @p = map { [prl($_)] } @p;
+    @p = map { [pattern_regexp_list($_)] } @p;
     my @dirs = list_dirs(q{.});
     for my $d (@dirs) {
-        next if (exists $recursiveignoredirs{$d});
+        next if (exists $ignore_dirs{$d});
         my @dl = ($d);
         my $m = match_recursive(\@dl,\@p,1);
         if ($m) {
@@ -220,7 +221,7 @@ sub fcd_dir {
     }
     my @dirs = list_dirs(q{.});
     my $p = shift @p;
-    my @prl = prl($p);
+    my @prl = pattern_regexp_list($p);
     for my $d (match_dirs(\@dirs,\@prl)) {
         if (@p == 0) {
             return $d;
@@ -244,13 +245,13 @@ sub fcd {
     chdir $cwd;
     $path =~ s/\/\//\//xg;
     if ( -d $path ) {
-        return dump_freq( $path );
+        return $path;
     }
     my @p = split /\//x, $path;
     if ( substr($path,0,1) eq q{/} ) {
         $p[0] = q{/};
     }
-    return dump_freq( fcd_dir(@p) || fcd_freq(@p) || fcd_recursive(@p) || (join q{/}, @p) );
+    return fcd_dir(@p) || fcd_freq(@p) || fcd_recursive(@p);
 }
 
 unlink $socket_path if -e $socket_path;
@@ -259,7 +260,7 @@ my $socket = IO::Socket::UNIX->new(
     Local  => $socket_path,
     Type   => SOCK_STREAM(),
     Listen => SOMAXCONN(),
-) or die("Couldn't create a socket: $!");
+) or confess("Couldn't create a socket");
 
 my $cwd;
 my $path;
@@ -269,7 +270,8 @@ while (1) {
         $con->autoflush(1);
         chomp( $cwd = <$con> );
         chomp( $path = <$con> );
-        print {$con} fcd($cwd,$path) . "\n";
+        my $found = fcd($cwd,$path);
+        print {$con} (defined $found && dump_freq($found) || $path) . "\n";
         close $con;
     }
 }
