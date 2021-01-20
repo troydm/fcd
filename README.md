@@ -17,7 +17,7 @@ Add this function to your shell profile (either .bashrc or .zshrc)
 
 ```sh
 # fcd
-fcd() { cd "$(fcdclient "$@")"; }
+fcd() { fcdclient "$@"; cd "$(cat /tmp/fcd_$USER)"; rm -f /tmp/fcd_$USER; }
 ```
 ## Usage
 
@@ -31,3 +31,8 @@ to go into that folder just type, fcd will automatically find suitable folder ba
 fcdserver is automatically started when you run fcd first time, it creates ~/.fcddump file
 which contains stats about often visited directories and number of times they were visited,
 this file is also used as a sort of bookmark when search for a directories
+
+You can customize directory completion prompt using enviroment variable FCD_PROMPT, see Term::ANSIColor, default value is
+```sh
+export FCD_PROMPT="('ansi223 on_ansi236','  ','ansi236','')"
+```

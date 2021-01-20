@@ -1,8 +1,9 @@
 #!/usr/bin/env perl
 # fcdserver - faster cd server script
 # written in Perl and licensed under MIT terms and conditions
-# (C) 2017 Dmitry "troydm" Geurkov (d.geurkov@gmail.com)
+# (C) 2017-2021 Dmitry "troydm" Geurkov (d.geurkov@gmail.com)
 
+use 5.010;
 use strict;
 use warnings;
 use utf8;
@@ -14,20 +15,20 @@ use POSIX qw(setsid);
 use Carp qw(confess);
 
 sub daemonize {
-    chdir(q{/})                      || confess "can't chdir to /";
-    open( STDIN, "<", "/dev/null" )  || confess "can't read /dev/null";
-    open( STDOUT, ">", "/dev/null" ) || confess "can't write to /dev/null";
-    defined( my $pid = fork() )      || confess "can't fork";
+    chdir(q{/})                      || confess 'can\'t chdir to /';
+    open( STDIN, '<', '/dev/null' )  || confess 'can\'t read /dev/null';
+    open( STDOUT, '>', '/dev/null' ) || confess 'can\'t write to /dev/null';
+    defined( my $pid = fork() )      || confess 'can\'t fork';
     exit if $pid;    # non-zero now means I am the parent
-    ( setsid() != -1 )               || confess "can't start a new session";
-    open( STDERR, ">", "/dev/null" ) || confess "can't write to /dev/null";
+    ( setsid() != -1 )               || confess 'can\'t start a new session';
+    open( STDERR, '>', '/dev/null' ) || confess 'can\'t write to /dev/null';
     return;
 }
 
 daemonize unless defined( $ARGV[0] ) && $ARGV[0] eq '-f';
 
-my $user = getlogin || getpwuid $<;
-my $socket_path = "/tmp/fcd_$user.sock";
+my $user         = getlogin || getpwuid $<;
+my $socket_path  = "/tmp/fcd_$user.sock";
 my $fcddump_path = $ENV{'HOME'} . '/.fcddump';
 
 sub signal_handler {
@@ -41,7 +42,7 @@ local $SIG{TERM} = \&signal_handler;
 my %freq;
 
 if ( -e $fcddump_path ) {
-    if (open( my $fh, '<', $fcddump_path )) {
+    if ( open( my $fh, '<', $fcddump_path ) ) {
         binmode( $fh, ':encoding(UTF-8)' );
         while ( my $line = <$fh> ) {
             chomp $line;
@@ -53,15 +54,15 @@ if ( -e $fcddump_path ) {
     }
 }
 
-my %ignore_dirs = ('.git' => 1);
-my $max_depth = 5;
-my $freq_dump_interval = 300;
+my %ignore_dirs         = ( '.git' => 1 );
+my $max_depth           = 5;
+my $freq_dump_interval  = 300;
 my $last_freq_dump_time = time();
 
 sub list_dirs {
     my ($dir) = @_;
     my @dirs;
-    if (opendir( my $dh, $dir )) {
+    if ( opendir( my $dh, $dir ) ) {
         while ( readdir $dh ) {
             if ( !( $_ =~ /^\.{1,2}$/x ) && -d "$dir/$_" ) {
                 push @dirs, $_;
@@ -77,13 +78,13 @@ sub dump_freq {
     $dir =~ s/\/\//\//xg;
     $dir = realpath($dir) || $dir;
     if ( -d $dir ) {
-        $freq{$dir} = ($freq{$dir} || 0) + 1;
+        $freq{$dir} = ( $freq{$dir} || 0 ) + 1;
     }
-    elsif (exists $freq{$dir}) {
+    elsif ( exists $freq{$dir} ) {
         delete $freq{$dir};
     }
     if ( ( time() - $last_freq_dump_time ) >= $freq_dump_interval ) {
-        if (open( my $fh, '>', $fcddump_path )) {
+        if ( open( my $fh, '>', $fcddump_path ) ) {
             binmode( $fh, ':encoding(UTF-8)' );
             foreach my $d ( keys %freq ) {
                 print {$fh} "$d=$freq{$d}\n";
@@ -97,23 +98,21 @@ sub dump_freq {
 
 sub pattern_regexp_list {
     my ($p) = @_;
-    return (qr/^\Q$p\E$/x, qr/^\Q$p\E$/xi, qr/^\Q$p\E/xi, qr/\Q$p\E/xi);
+    return ( qr/^\Q$p\E$/x, qr/^\Q$p\E$/xi, qr/^\Q$p\E/xi, qr/\Q$p\E/xi );
 }
 
 sub match_array {
-    my ($dp,$prlp) = @_;
-    my @d = @$dp;
-    my @prl = @$prlp;
-    my @p = @{shift @prl};
-    for my $pr (@p) {
+    my @d   = @{ $_[0] };
+    my @prl = @{ $_[1] };
+    for my $pr ( @{ shift @prl } ) {
         my $i = 1;
-        for my $d (@$dp) {
-            if ($d =~ $pr) {
-                if (@prl == 0) {
+        for my $d (@d) {
+            if ( $d =~ $pr ) {
+                if ( @prl == 0 ) {
                     return 1;
                 }
                 my @sd = @d[ $i .. $#d ];
-                if (match_array(\@sd,\@prl)) {
+                if ( match_array( \@sd, \@prl ) ) {
                     return 1;
                 }
             }
@@ -125,78 +124,73 @@ sub match_array {
 
 sub fcd_freq {
     my (@p) = @_;
-    @p = map { [pattern_regexp_list($_)] } @p;
-    my @dirs = sort { -1 * ($freq{$a} cmp $freq{$b}) } (keys %freq);
+    @p = map { [ pattern_regexp_list($_) ] } @p;
+    my @dirs = sort { -1 * ( $freq{$a} cmp $freq{$b} ) } ( keys %freq );
+    my @result;
     for my $d (@dirs) {
         my @d = split /\//x, $d;
-        if (match_array(\@d,\@p)) {
-            return $d;
+        if ( match_array( \@d, \@p ) ) {
+            push @result, $d;
         }
     }
-    return;
+    return @result;
 }
 
 sub match_recursive {
-    my ($dl,$p,$lvl) = @_;
-    if (match_array($dl,$p)) {
-        return (join q{/}, @$dl);
+    my ( $dl, $p, $lvl ) = @_;
+    if ( match_array( $dl, $p ) ) {
+        return ( join q{/}, @$dl );
     }
-    if ($lvl <= $max_depth) {
-        my @dirs = list_dirs((join q{/}, @$dl));
-        for my $d (@dirs) {
-            next if (exists $ignore_dirs{$d});
-            my @dp = (@$dl,$d);
-            my $m = match_recursive(\@dp,$p,$lvl+1);
-            if ($m) {
-                return $m;
-            }
+    my @result;
+    if ( $lvl <= $max_depth ) {
+        for my $d ( list_dirs( ( join q{/}, @$dl ) ) ) {
+            next if ( exists $ignore_dirs{$d} );
+            my @dp = ( @$dl, $d );
+            push @result, match_recursive( \@dp, $p, $lvl + 1 );
         }
     }
-    return;
+    return @result;
 }
 
 sub fcd_recursive {
     my (@p) = @_;
     my $wd = cwd();
     @p = reduce_pattern(@p);
-    if (@p == 0) {
+    if ( @p == 0 ) {
         return cwd();
     }
-    @p = map { [pattern_regexp_list($_)] } @p;
-    my @dirs = list_dirs(q{.});
-    for my $d (@dirs) {
-        next if (exists $ignore_dirs{$d});
+    @p = map { [ pattern_regexp_list($_) ] } @p;
+    my @result;
+    for my $d ( list_dirs(q{.}) ) {
+        next if ( exists $ignore_dirs{$d} );
         my @dl = ($d);
-        my $m = match_recursive(\@dl,\@p,1);
-        if ($m) {
-            return $m;
-        }
+        push @result, match_recursive( \@dl, \@p, 1 );
     }
     chdir $wd;
-    return;
+    return @result;
 }
 
 sub match_dirs {
-    my ($dirs,$pl) = @_;
-    my @result;
+    my ( $dirs, $pl ) = @_;
+    my %result;
     for my $p (@$pl) {
         for my $d (@$dirs) {
-            if ($d =~ $p && !(grep { $_ eq $d } @result)) {
-                push @result, $d;
+            if ( $d =~ $p ) {
+                $result{$d} = 1;
             }
         }
     }
-    return @result;
+    return ( keys %result );
 }
 
 sub reduce_pattern {
     my (@p) = @_;
     my $cwd = '';
-    while (@p > 0) {
+    while ( @p > 0 ) {
         my $p = $p[0];
         if ( -d "$cwd$p" ) {
             if ($cwd) {
-                $cwd .= (shift @p) . q{/};
+                $cwd .= ( shift @p ) . q{/};
             }
             else {
                 $cwd = shift @p;
@@ -216,42 +210,43 @@ sub fcd_dir {
     my (@p) = @_;
     my $wd = cwd();
     @p = reduce_pattern(@p);
-    if (@p == 0) {
+    if ( @p == 0 ) {
         return cwd();
     }
     my @dirs = list_dirs(q{.});
-    my $p = shift @p;
-    my @prl = pattern_regexp_list($p);
-    for my $d (match_dirs(\@dirs,\@prl)) {
-        if (@p == 0) {
-            return $d;
+    my $p    = shift @p;
+    my @prl  = pattern_regexp_list($p);
+    my @result;
+    for my $d ( match_dirs( \@dirs, \@prl ) ) {
+        if ( @p == 0 ) {
+            push @result, $d;
         }
         else {
             my $subwd = cwd();
             chdir $d;
-            my $found = fcd_dir(@p);
-            if ($found) {
-                return $found;
-            }
+            push @result, fcd_dir(@p);
             chdir $subwd;
         }
     }
     chdir $wd;
-    return;
+    return @result;
 }
 
 sub fcd {
-    my ($cwd,$path) = @_;
+    my ( $cwd, $path ) = @_;
     chdir $cwd;
     $path =~ s/\/\//\//xg;
     if ( -d $path ) {
         return $path;
     }
     my @p = split /\//x, $path;
-    if ( substr($path,0,1) eq q{/} ) {
+    if ( substr( $path, 0, 1 ) eq q{/} ) {
         $p[0] = q{/};
     }
-    return fcd_dir(@p) || fcd_freq(@p) || fcd_recursive(@p);
+    my @result = fcd_dir(@p);
+    @result = fcd_freq(@p)      unless @result;
+    @result = fcd_recursive(@p) unless @result;
+    return @result;
 }
 
 unlink $socket_path if -e $socket_path;
@@ -268,10 +263,24 @@ while (1) {
     if ( my $con = $socket->accept ) {
         binmode( $con, ':encoding(UTF-8)' );
         $con->autoflush(1);
-        chomp( $cwd = <$con> );
+        chomp( $cwd  = <$con> );
         chomp( $path = <$con> );
-        my $found = fcd($cwd,$path);
-        print {$con} (defined $found && dump_freq($found) || $path) . "\n";
+        my @found      = fcd( $cwd, $path );
+        my $found_size = scalar @found;
+        say {$con} $found_size;
+        for my $found (@found) {
+            say {$con} $found;
+        }
+        if ( $found_size == 1 ) {
+            dump_freq( $found[0] );
+        }
+        else {
+            $path = <$con>;
+            if ($path) {
+                chomp $path;
+                dump_freq($path);
+            }
+        }
         close $con;
     }
 }

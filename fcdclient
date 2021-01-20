@@ -1,13 +1,22 @@
 #!/usr/bin/env perl
 # fcdclient - faster cd client script
 # written in Perl and licensed under MIT terms and conditions
-# (C) 2017 Dmitry "troydm" Geurkov (d.geurkov@gmail.com)
+# (C) 2017-2021 Dmitry "troydm" Geurkov (d.geurkov@gmail.com)
 
+use 5.010;
 use strict;
 use warnings;
 use utf8;
 use IO::Socket::UNIX;
 use Cwd qw(cwd);
+use Term::Complete qw(Complete);
+use Term::ANSIColor qw(colored);
+
+# config
+my @prompt = ( 'ansi223 on_ansi236', '  ', 'ansi236', '' );
+if ( exists $ENV{'FCD_PROMPT'} ) {
+    @prompt = eval $ENV{'FCD_PROMPT'};
+}
 
 my $dir;
 if (@ARGV) {
@@ -20,6 +29,7 @@ else {
 my $wd          = cwd();
 my $user        = getlogin || getpwuid $<;
 my $socket_path = "/tmp/fcd_$user.sock";
+my $out_path    = "/tmp/fcd_$user";
 
 my $socket;
 my $fcdserver_started = 0;
@@ -45,6 +55,62 @@ binmode $socket, ':encoding(UTF-8)';
 
 $socket->autoflush(1);
 print {$socket} "$wd\n$dir\n";
-chomp( my $line = <$socket> );
-print $line;
+chomp( my $found_size = <$socket> );
+my $found;
+if ( $found_size == 0 ) {
+    $found = $dir;
+}
+elsif ( $found_size == 1 ) {
+    chomp( $found = <$socket> );
+}
+else {
+    my @dirs;
+    while ( $found_size > 0 ) {
+        chomp( my $line = <$socket> );
+        push @dirs, $line;
+        $found_size--;
+    }
+    @dirs = sort @dirs;
+    for my $dir (@dirs) {
+        say $dir;
+    }
+    my $prompt = '';
+    my $i      = 0;
+    while ( $i < @prompt ) {
+        $prompt .= colored( [ $prompt[$i] ], $prompt[ $i + 1 ] );
+        $i = $i + 2;
+    }
+    my $select = Complete( $prompt . ' ', \@dirs );
+    $found = '';
+    if ($select) {
+        if ( -d $select ) {
+            $found = $select;
+        }
+        unless ($found) {
+            my @p = split ' ', $select;
+            for my $d (@dirs) {
+                $found = $d;
+                for my $p (@p) {
+                    if ( $d =~ /\Q$p\E(.*)/xi ) {
+                        $d = $1;
+                    }
+                    else {
+                        $found = '';
+                        last;
+                    }
+                }
+                if ($found) {
+                    last;
+                }
+            }
+        }
+    }
+    say {$socket} $found;
+    $found = $dir unless $found;
+}
 close $socket;
+
+if ( open my $fh, '>', $out_path ) {
+    print {$fh} $found;
+    close $fh;
+}
