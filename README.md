@@ -34,5 +34,5 @@ this file is also used as a sort of bookmark when search for a directories
 
 You can customize directory completion prompt using enviroment variable FCD_PROMPT, see Term::ANSIColor, default value is
 ```sh
-export FCD_PROMPT="('ansi223 on_ansi236','  ','ansi236','')"
+export FCD_PROMPT="('rgb543 on_grey4', '  ', 'grey4', '')"
 ```

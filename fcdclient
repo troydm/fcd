@@ -13,7 +13,7 @@ use Term::Complete qw(Complete);
 use Term::ANSIColor qw(colored);
 
 # config
-my @prompt = ( 'ansi223 on_ansi236', '  ', 'ansi236', '' );
+my @prompt = ( 'rgb543 on_grey4', '  ', 'grey4', '' );
 if ( exists $ENV{'FCD_PROMPT'} ) {
     @prompt = eval $ENV{'FCD_PROMPT'};
 }
