@@ -27,7 +27,7 @@ else {
 }
 
 my $wd          = cwd();
-my $user        = getlogin || getpwuid $<;
+my $user        = getpwuid $<;
 my $socket_path = "/tmp/fcd_$user.sock";
 my $out_path    = "/tmp/fcd_$user";
 

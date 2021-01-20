@@ -27,7 +27,7 @@ sub daemonize {
 
 daemonize unless defined( $ARGV[0] ) && $ARGV[0] eq '-f';
 
-my $user         = getlogin || getpwuid $<;
+my $user         = getpwuid $<;
 my $socket_path  = "/tmp/fcd_$user.sock";
 my $fcddump_path = $ENV{'HOME'} . '/.fcddump';
 
