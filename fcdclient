@@ -103,40 +103,40 @@ sub complete {
             $buffer .= $_;
             # up or down key
             if ($buffer eq "\033\133\101" || $buffer eq "\033\133\102") {
-                my $comp;
+                my ($j, $comp);
                 my $up = $buffer eq "\033\133\101";
                 unless ($return) {
-                    $comp = $dirs->[$up ? 0 : $#{$dirs}];
+                    $j = -1;
                 }
                 else {
-                    my $i = 0;
+                    $j = 0;
                     for my $dir (@{$dirs}) {
                         if ($dir eq $return) {
                             last;
                         }
-                        $i++;
+                        $j++;
                     }
-                    if ($i >= @{$dirs}) {
-                        $i = $#{$dirs};
+                    if ($j >= @{$dirs}) {
+                        $j = $#{$dirs};
                         for my $dir (reverse @{$dirs}) {
                             if ($dir =~ /^\Q$return\E/x) {
                                 last;
                             }
-                            $i--;
+                            $j--;
                         }
                     }
-                    if ($i >= @{$dirs}) {
-                        $i = -1;
+                    if ($j >= @{$dirs}) {
+                        $j = -1;
                     }
-                    $i = $up ? $i - 1 : $i + 1;
-                    if ($i < 0) {
-                        $i = $#{$dirs};
-                    }
-                    elsif ($i > $#{$dirs}) {
-                        $i = 0;
-                    }
-                    $comp = $dirs->[$i];
                 }
+                $j = $up ? $j - 1 : $j + 1;
+                if ($j < 0) {
+                    $j = $#{$dirs};
+                }
+                elsif ($j > $#{$dirs}) {
+                    $j = 0;
+                }
+                $comp = $dirs->[$j];
                 ($return, $i) = prompt_update($i, $return, length $comp, $comp);
                 $buffer = '';
             }
