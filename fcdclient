@@ -7,15 +7,246 @@ use 5.010;
 use strict;
 use warnings;
 use utf8;
-use IO::Socket::UNIX;
 use Cwd qw(cwd);
-use Term::Complete qw(Complete);
+use IO::Socket::UNIX;
 use Term::ANSIColor qw(colored);
 
 # config
 my @prompt = ( 'rgb543 on_grey4', '  ', 'grey4', '' );
 if ( exists $ENV{'FCD_PROMPT'} ) {
     @prompt = eval $ENV{'FCD_PROMPT'};
+}
+
+sub common_prefix {
+    my ($start, $dirs) = @_;
+    my $newstart = $start;
+    while ($newstart) {
+        if ( (length $start) + 1 > length $dirs->[0] ) {
+            last;
+        }
+        $newstart = substr $dirs->[0], 0, (length $start) + 1;
+        for my $dir (@{$dirs}) {
+            unless ($dir =~ /^\Q$newstart\E/x) {
+                $newstart = undef;
+                last;
+            }
+        }
+        if ($newstart) {
+            $start = $newstart;
+        }
+    }
+    return $start;
+}
+
+sub prompt_update {
+    my ($i, $old, $j, $new) = @_;
+    if ($i > 0) {
+        print "\033[${i}D";
+    }
+    print $new;
+    $i = (length $old) - (length $new);
+    if ($i > 0) {
+        print ' ' x $i;
+    } else {
+        $i = 0;
+    }
+    $i = $j - $i - (length $new);
+    if ($i > 0) {
+        print "\033[${i}C";
+    } elsif ($i < 0) {
+        $i = -$i;
+        print "\033[${i}D";
+    }
+    return ($new, $j);
+}
+
+sub complete {
+    my ($prompt,$dirs) = @_;
+
+    # detect stty
+    my ($stty, $tty_raw_noecho, $tty_restore, $tty_safe_restore) = ();
+    foreach my $s (qw(/bin/stty /usr/bin/stty)) {
+        if (-x $s) {
+            $tty_raw_noecho = "$s raw -echo";
+            $tty_restore    = "$s -raw echo";
+            $tty_safe_restore = $tty_restore;
+            $stty = $s;
+            last;
+        }
+    }
+
+    # save current tty state
+    my $tty_saved_state = qx($stty -g 2>/dev/null);
+    if ($?) {
+        # stty -g not supported
+        $tty_saved_state = undef;
+    }
+    else {
+        $tty_saved_state =~ s/\s+$//g;
+        $tty_restore = qq($stty "$tty_saved_state" 2>/dev/null);
+    }
+
+    for my $dir (@{$dirs}) {
+        say $dir;
+    }
+    print $prompt;
+
+    # tty noecho
+    system $tty_raw_noecho if defined $tty_raw_noecho;
+
+    my $return = '';
+    my $buffer = '';
+    my $i = 0;
+    local $_;
+    while ( ($_ = getc(STDIN)) ne "\r" ) {
+        if ($buffer) {
+            $buffer .= $_;
+            # up or down key
+            if ($buffer eq "\033\133\101" || $buffer eq "\033\133\102") {
+                my $comp;
+                my $up = $buffer eq "\033\133\101";
+                unless ($return) {
+                    $comp = $dirs->[$up ? 0 : $#{$dirs}];
+                }
+                else {
+                    my $i = 0;
+                    for my $dir (@{$dirs}) {
+                        if ($dir eq $return) {
+                            last;
+                        }
+                        $i++;
+                    }
+                    if ($i >= @{$dirs}) {
+                        $i = $#{$dirs};
+                        for my $dir (reverse @{$dirs}) {
+                            if ($dir =~ /^\Q$return\E/x) {
+                                last;
+                            }
+                            $i--;
+                        }
+                    }
+                    if ($i >= @{$dirs}) {
+                        $i = -1;
+                    }
+                    $i = $up ? $i - 1 : $i + 1;
+                    if ($i < 0) {
+                        $i = $#{$dirs};
+                    }
+                    elsif ($i > $#{$dirs}) {
+                        $i = 0;
+                    }
+                    $comp = $dirs->[$i];
+                }
+                ($return, $i) = prompt_update($i, $return, length $comp, $comp);
+                $buffer = '';
+            }
+            # left key
+            elsif ($buffer eq "\033\133\104") {
+                if ($i > 0) {
+                    print "\033[1D";
+                    $i--;
+                }
+                $buffer = '';
+            }
+            # right key
+            elsif ($buffer eq "\033\133\103") {
+                if ($i < length $return) {
+                    print "\033[1C";
+                    $i++;
+                }
+                $buffer = '';
+            }
+            # delete key
+            elsif ($buffer eq "\033\133\063\176") {
+                if ($i < length $return) {
+                    ($return, $i) = prompt_update($i, $return, $i, (substr $return, 0, $i).(substr $return, $i + 1));
+                }
+                $buffer = '';
+            }
+            # unknown escape sequence
+            elsif (length $buffer >= 4) {
+                print "\007";
+                $buffer = '';
+            }
+        }
+        # tab
+        elsif (ord == 9) {
+            unless ($return) {
+                $return = $dirs->[0];
+                print $return;
+                $i = length $return;
+            }
+            else {
+                if (length $return == $i) {
+                    my @comp = grep { $_ =~ /^\Q$return\E/ } @{$dirs};
+                    if (@comp == 0) {
+                        print "\007";
+                    }
+                    elsif (@comp == 1) {
+                        ($return, $i) = prompt_update($i, $return, length $comp[0], $comp[0]);
+                    }
+                    elsif (@comp > 1) {
+                        my $prefix = common_prefix($return,\@comp);
+                        ($return, $i) = prompt_update($i, $return, length $prefix, $prefix);
+                    }
+                }
+                else {
+                    print "\007";
+                }
+            }
+        }
+        # ctrl+c or ctrl+d
+        elsif (ord == 3 || ord == 4) {
+            $return = '';
+            last;
+        }
+        # escape sequence
+        elsif ( ord == 27 ) {
+            $buffer .= $_;
+        }
+        # ctrl+w
+        elsif ( ord == 23 ) {
+            if ($i > 0 && length $return > 0) {
+                my $j = $i;
+                while ($j > 0) {
+                    $j--;
+                    my $c = substr $return, $j, 1;
+                    if ($c eq ' ' || $c eq '/') {
+                        if ($j + 1 != $i) {
+                            $j++;
+                        }
+                        last;
+                    }
+                }
+                if ($i != $j) {
+                    my $remove = (substr $return, 0, $j).(substr $return, $i);
+                    ($return, $i) = prompt_update($i, $return, $j, $remove);
+                }
+            }
+        }
+        # backspace
+        elsif ( ord == 127 ) {
+            if ($i > 0 && length $return > 0) {
+                ($return, $i) = prompt_update($i, $return, $i-1, (substr $return, 0, $i-1).(substr $return, $i));
+            }
+        }
+        # any character
+        elsif ( ord >= ord(' ') ) {
+            if (length $return == $i) {
+                ($return, $i) = prompt_update($i, $return, $i+1, $return.$_);
+            }
+            else {
+                ($return, $i) = prompt_update($i, $return, $i+1, (substr $return, 0, $i).$_.(substr $return, $i));
+            }
+        }
+    }
+
+    # restore tty
+    system $tty_restore;
+    if ($?) {
+        system $tty_safe_restore;
+    }
+    return $return;
 }
 
 my $dir;
@@ -71,18 +302,16 @@ else {
         $found_size--;
     }
     @dirs = sort @dirs;
-    for my $dir (@dirs) {
-        say $dir;
-    }
     my $prompt = '';
     my $i      = 0;
     while ( $i < @prompt ) {
         $prompt .= colored( [ $prompt[$i] ], $prompt[ $i + 1 ] );
         $i = $i + 2;
     }
-    my $select = Complete( $prompt . ' ', \@dirs );
+    my $select = complete( $prompt . ' ', \@dirs );
     $found = '';
     if ($select) {
+        say '';
         if ( -d $select ) {
             $found = $select;
         }
