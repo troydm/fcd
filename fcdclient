@@ -97,6 +97,18 @@ sub dir_suggestions_clear {
 
 sub dir_suggestions_update {
     my ($return, $col_pos, $dir_suggestions, $new_suggestions) = @_;
+    if ( @{$dir_suggestions} == @{$new_suggestions} ) {
+        my $i = 0;
+        while ($i < @{$new_suggestions}) {
+            unless ( $new_suggestions->[$i] eq $dir_suggestions->[$i] ) {
+                last;
+            }
+            $i++;
+        }
+        if ($i == @{$new_suggestions}) {
+            return @{$new_suggestions};
+        }
+    }
     dir_suggestions_clear($return, $col_pos, $dir_suggestions);
     if (@{$new_suggestions} > 0) {
         my $count = 0;
