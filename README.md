@@ -32,7 +32,8 @@ fcdserver is automatically started when you run fcd first time, it creates ~/.fc
 which contains stats about often visited directories and number of times they were visited,
 this file is also used as a sort of bookmark when search for a directories
 
-You can customize directory completion prompt using enviroment variable FCD_PROMPT, see Term::ANSIColor, default value is
+You can customize directory completion prompt using enviroment variables FCD_PROMPT and FCD_DIR_COLORS, see Term::ANSIColor, default value is
 ```sh
-export FCD_PROMPT="('rgb543 on_grey4', '  ', 'grey4', '')"
+export FCD_PROMPT="rgb543 on_grey4,  ,grey4,"
+export FCD_DIR_COLORS="rgb543,reset"
 ```

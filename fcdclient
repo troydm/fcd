@@ -12,9 +12,29 @@ use IO::Socket::UNIX;
 use Term::ANSIColor qw(colored);
 
 # config
-my @prompt = ( 'rgb543 on_grey4', '  ', 'grey4', '' );
+my @prompt;
 if ( exists $ENV{'FCD_PROMPT'} ) {
-    @prompt = eval $ENV{'FCD_PROMPT'};
+    my $prompt = $ENV{'FCD_PROMPT'};
+    utf8::decode($prompt);
+    @prompt = split q(,), $prompt;
+}
+else {
+    @prompt = ( 'rgb543 on_grey4', '  ', 'grey4', '' );
+}
+my @dir_colors;
+if ( exists $ENV{'FCD_DIR_COLORS'} ) {
+    my $dir_colors = $ENV{'FCD_DIR_COLORS'};
+    utf8::decode($dir_colors);
+    @dir_colors = split q(,), $dir_colors;
+}
+else {
+    @dir_colors = ( 'rgb543', 'reset' );
+}
+
+sub trim {
+    my ($s) = @_;
+    $s =~ s/^\s+|\s+$//gx;
+    return $s;
 }
 
 sub common_prefix {
@@ -43,7 +63,7 @@ sub prompt_update {
     if ($i > 0) {
         print "\033[${i}D";
     }
-    print $new;
+    print colored( [$dir_colors[-d trim($new) ? 0 : 1]], $new );
     $i = (length $old) - (length $new);
     if ($i > 0) {
         print ' ' x $i;
@@ -60,8 +80,38 @@ sub prompt_update {
     return ($new, $j);
 }
 
+sub dir_suggestions_clear {
+    my ($return, $col_pos, $dir_suggestions) = @_;
+    my $count = scalar @{$dir_suggestions};
+    if ($count > 0) {
+        print "\033[${col_pos}D";
+        my $i = $count;
+        while ($i > 0) {
+            print "\033[1B\033[K";
+            $i--;
+        }
+        print "\033[${count}A\033[${col_pos}C";
+    }
+    return ();
+}
+
+sub dir_suggestions_update {
+    my ($return, $col_pos, $dir_suggestions, $new_suggestions) = @_;
+    dir_suggestions_clear($return, $col_pos, $dir_suggestions);
+    if (@{$new_suggestions} > 0) {
+        my $count = 0;
+        print "\033[${col_pos}D";
+        for my $suggestion (@{$new_suggestions}) {
+            print "\033[1B".(colored([$dir_colors[0]], $suggestion))."\033[".(length $suggestion)."D";
+            $count++;
+        }
+        print "\033[${count}A\033[${col_pos}C";
+    }
+    return @{$new_suggestions};
+}
+
 sub complete {
-    my ($prompt,$dirs) = @_;
+    my ($prompt,$prompt_len,$dirs) = @_;
 
     # detect stty
     my ($stty, $tty_raw_noecho, $tty_restore, $tty_safe_restore) = ();
@@ -82,14 +132,16 @@ sub complete {
         $tty_saved_state = undef;
     }
     else {
-        $tty_saved_state =~ s/\s+$//g;
+        $tty_saved_state =~ s/\s+$//gx;
         $tty_restore = qq($stty "$tty_saved_state" 2>/dev/null);
     }
 
+    say $prompt;
     for my $dir (@{$dirs}) {
-        say $dir;
+        say colored([$dir_colors[0]], $dir);
     }
-    print $prompt;
+    my @dir_suggestions = @{$dirs};
+    print "\033[".(@dir_suggestions + 1)."A\033[${prompt_len}C";
 
     # tty noecho
     system $tty_raw_noecho if defined $tty_raw_noecho;
@@ -138,6 +190,7 @@ sub complete {
                 }
                 $comp = $dirs->[$j];
                 ($return, $i) = prompt_update($i, $return, length $comp, $comp);
+                @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $dirs);
                 $buffer = '';
             }
             # left key
@@ -160,6 +213,8 @@ sub complete {
             elsif ($buffer eq "\033\133\063\176") {
                 if ($i < length $return) {
                     ($return, $i) = prompt_update($i, $return, $i, (substr $return, 0, $i).(substr $return, $i + 1));
+                    my @possible_suggestions = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
+                    @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $return eq '' ? $dirs : \@possible_suggestions);
                 }
                 $buffer = '';
             }
@@ -172,22 +227,23 @@ sub complete {
         # tab
         elsif (ord == 9) {
             unless ($return) {
-                $return = $dirs->[0];
-                print $return;
-                $i = length $return;
+                ($return, $i) = prompt_update($i, $return, length $dirs->[0], $dirs->[0]);
+                @dir_suggestions = dir_suggestions_clear($return, $i + $prompt_len, \@dir_suggestions);
             }
             else {
                 if (length $return == $i) {
-                    my @comp = grep { $_ =~ /^\Q$return\E/ } @{$dirs};
+                    my @comp = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
                     if (@comp == 0) {
                         print "\007";
                     }
                     elsif (@comp == 1) {
                         ($return, $i) = prompt_update($i, $return, length $comp[0], $comp[0]);
+                        @dir_suggestions = dir_suggestions_clear($return, $i + $prompt_len, \@dir_suggestions);
                     }
                     elsif (@comp > 1) {
                         my $prefix = common_prefix($return,\@comp);
                         ($return, $i) = prompt_update($i, $return, length $prefix, $prefix);
+                        @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, \@comp);
                     }
                 }
                 else {
@@ -221,6 +277,8 @@ sub complete {
                 if ($i != $j) {
                     my $remove = (substr $return, 0, $j).(substr $return, $i);
                     ($return, $i) = prompt_update($i, $return, $j, $remove);
+                    my @possible_suggestions = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
+                    @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $return eq '' ? $dirs : \@possible_suggestions);
                 }
             }
         }
@@ -228,6 +286,8 @@ sub complete {
         elsif ( ord == 127 ) {
             if ($i > 0 && length $return > 0) {
                 ($return, $i) = prompt_update($i, $return, $i-1, (substr $return, 0, $i-1).(substr $return, $i));
+                my @possible_suggestions = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
+                @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $return eq '' ? $dirs : \@possible_suggestions);
             }
         }
         # any character
@@ -238,14 +298,20 @@ sub complete {
             else {
                 ($return, $i) = prompt_update($i, $return, $i+1, (substr $return, 0, $i).$_.(substr $return, $i));
             }
+            my @possible_suggestions = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
+            @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $return eq '' ? $dirs : \@possible_suggestions);
         }
     }
+
+    dir_suggestions_clear($return, $i + $prompt_len, \@dir_suggestions);
+    print "\033[".($i + $prompt_len)."D\033[K";
 
     # restore tty
     system $tty_restore;
     if ($?) {
         system $tty_safe_restore;
     }
+
     return $return;
 }
 
@@ -303,15 +369,17 @@ else {
     }
     @dirs = sort @dirs;
     my $prompt = '';
+    my $prompt_len = 0;
     my $i      = 0;
     while ( $i < @prompt ) {
         $prompt .= colored( [ $prompt[$i] ], $prompt[ $i + 1 ] );
+        $prompt_len += length $prompt[ $i + 1 ];
         $i = $i + 2;
     }
-    my $select = complete( $prompt . ' ', \@dirs );
+    my $select = complete( $prompt . ' ', $prompt_len + 1, \@dirs );
     $found = '';
     if ($select) {
-        say '';
+        $select = trim($select);
         if ( -d $select ) {
             $found = $select;
         }
