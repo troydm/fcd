@@ -227,7 +227,7 @@ sub complete {
             elsif ($buffer eq "\033\133\063\176") {
                 if ($i < length $return) {
                     ($return, $i) = prompt_update($i, $return, $i, (substr $return, 0, $i).(substr $return, $i + 1));
-                    my @possible_suggestions = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
+                    my @possible_suggestions = grep { $_ =~ /\Q$return\E/xi } @{$dirs};
                     @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $return eq '' ? $dirs : \@possible_suggestions);
                 }
                 $buffer = '';
@@ -300,7 +300,7 @@ sub complete {
         elsif ( ord == 127 ) {
             if ($i > 0 && length $return > 0) {
                 ($return, $i) = prompt_update($i, $return, $i-1, (substr $return, 0, $i-1).(substr $return, $i));
-                my @possible_suggestions = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
+                my @possible_suggestions = grep { $_ =~ /\Q$return\E/xi } @{$dirs};
                 @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $return eq '' ? $dirs : \@possible_suggestions);
             }
         }
@@ -312,7 +312,7 @@ sub complete {
             else {
                 ($return, $i) = prompt_update($i, $return, $i+1, (substr $return, 0, $i).$_.(substr $return, $i));
             }
-            my @possible_suggestions = grep { $_ =~ /^\Q$return\E/x } @{$dirs};
+            my @possible_suggestions = grep { $_ =~ /\Q$return\E/xi } @{$dirs};
             @dir_suggestions = dir_suggestions_update($return, $i + $prompt_len, \@dir_suggestions, $return eq '' ? $dirs : \@possible_suggestions);
         }
     }
