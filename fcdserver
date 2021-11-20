@@ -214,13 +214,14 @@ sub fcd_dir {
     if ( @p == 0 ) {
         return cwd();
     }
+    my $curwd = cwd();
     my @dirs = list_dirs(q{.});
     my $p    = shift @p;
     my @prl  = pattern_regexp_list($p);
     my @result;
     for my $d ( match_dirs( \@dirs, \@prl ) ) {
         if ( @p == 0 ) {
-            push @result, $d;
+            push @result, "$curwd/$d";
         }
         else {
             my $subwd = cwd();
