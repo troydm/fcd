@@ -161,9 +161,10 @@ sub fcd_recursive {
     }
     @p = map { [ pattern_regexp_list($_) ] } @p;
     my @result;
+    my $curwd = cwd();
     for my $d ( list_dirs(q{.}) ) {
         next if ( exists $ignore_dirs{$d} );
-        my @dl = ($d);
+        my @dl = ($curwd, $d);
         push @result, match_recursive( \@dl, \@p, 1 );
     }
     chdir $wd;
