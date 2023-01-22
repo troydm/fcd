@@ -40,23 +40,28 @@ local $SIG{INT}  = \&signal_handler;
 local $SIG{TERM} = \&signal_handler;
 
 my %freq;
+my $freq_dump_modf_time = 0;
 
-if ( -e $fcddump_path ) {
-    if ( open( my $fh, '<', $fcddump_path ) ) {
-        binmode( $fh, ':encoding(UTF-8)' );
-        while ( my $line = <$fh> ) {
-            chomp $line;
-            if ( $line =~ /^(.+)=(\d+)$/x ) {
-                $freq{$1} = $2;
+sub read_freq_dump {
+    %freq = ();
+    if ( -e $fcddump_path ) {
+        if ( open( my $fh, '<', $fcddump_path ) ) {
+            binmode( $fh, ':encoding(UTF-8)' );
+            while ( my $line = <$fh> ) {
+                chomp $line;
+                if ( $line =~ /^(.+)=(\d+)$/x ) {
+                    $freq{$1} = $2;
+                }
             }
+            close $fh;
         }
-        close $fh;
+        $freq_dump_modf_time = (stat $fcddump_path)[9];
     }
 }
 
 my %ignore_dirs         = ( '.git' => 1 );
 my $max_depth           = 5;
-my $freq_dump_interval  = 300;
+my $freq_dump_interval  = 60;
 my $last_freq_dump_time = time();
 
 sub list_dirs {
@@ -91,6 +96,7 @@ sub dump_freq {
             }
             close $fh;
             $last_freq_dump_time = time();
+            $freq_dump_modf_time = (stat $fcddump_path)[9];
         }
     }
     return $dir;
@@ -244,6 +250,9 @@ sub fcd {
     my @p = split /\//x, $path;
     if ( substr( $path, 0, 1 ) eq q{/} ) {
         $p[0] = q{/};
+    }
+    if ( (stat $fcddump_path)[9] != $freq_dump_modf_time ) {
+        read_freq_dump;
     }
     my @result = fcd_dir(@p);
     @result = fcd_freq(@p)      unless @result;
