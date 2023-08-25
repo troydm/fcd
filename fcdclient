@@ -19,7 +19,7 @@ if ( exists $ENV{'FCD_PROMPT'} ) {
     @prompt = split q(,), $prompt;
 }
 else {
-    @prompt = ( 'rgb543 on_grey4', '  ', 'grey4', '' );
+    @prompt = ( 'rgb543 on_grey4', ' 󰜥 ', 'grey4', '' );
 }
 my @dir_colors;
 if ( exists $ENV{'FCD_DIR_COLORS'} ) {
